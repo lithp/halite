@@ -1,0 +1,7 @@
+*.log
+*.hlt
+*.swp
+*.swo
+replays/
+__pycache__
+halite
