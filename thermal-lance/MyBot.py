@@ -1,18 +1,32 @@
 '''
-Amoeba - pieces on the permiter attack the highest production piece they can
+Amoeba - pieces on the perimeter attack the highest production piece they can
        - pieces on the interior wait it out
 
 Lance - pieces on the interior move to the closest perimeter
 
-Thermal Lance - small improvements
-                don't move into any location which would cause you to cap
+Thermal Lance - don't move into any location which would cause you to cap
 
 Ideas:
 - Special-case combat somehow, optimize damage done / damage taken?
 - Special-case small colonies and optimize expansion / production
+
+TODO:
+- The overcap map is too easy to forget to set, build some kind of infra around it
+
+Maybe:
+- The overcap map is currently quite greedy, is it sometimes preferable for a piece
+  which wasn't seen first to move instead?
+
+Problems:
+- pieces spend a lot of time oscilating when attempting to get to the perim
+  This could be an artifact of being on the boundary of the kd-tree?
+  Soln: maybe when deciding which way to move, and filtering out capped ones,
+        you also filter out the direction which doesn't face the perim
+- Capping only checks internal pieces, pieces on the perimeter don't check for capping
+  I implemented this but it only improved game performance a little. It wasn't worth
+  the extra code
 '''
 
-import logging
 from collections import namedtuple, defaultdict
 import random
 import kdtree
@@ -20,14 +34,16 @@ import kdtree
 from hlt import *
 from networking import *
 
-Tup = namedtuple('Tup', ['loc', 'site'])
-
-logging.basicConfig(filename='amoeba.log')
-log = logging.getLogger()
-log.setLevel(logging.DEBUG)
+Piece = namedtuple('Piece', ['loc', 'site'])
 
 myID, gameMap = getInit()
 sendInit('thermal-lance')
+
+def p_mine(site):
+    return site.owner == myID
+
+def p_my_piece(piece):
+    return p_mine(piece.site)
 
 def group_by_pred(pred, iterable):
     'takes an iterable and returns two lists, the True and False lists'
@@ -39,100 +55,86 @@ def group_by_pred(pred, iterable):
             false.append(item)
     return true, false
 
-def adjacent_sites(gameMap, location):
+def adjacent_sites(gmap, location):
     for direction in CARDINALS:
-        loc = gameMap.getLocation(location, direction)
-        site = gameMap.getSite(loc)
+        loc = gmap.getLocation(location, direction)
+        site = gmap.getSite(loc)
         assert site, 'I am so confused'
-        yield Tup(loc, gameMap.getSite(loc))
+        yield Piece(loc, gmap.getSite(loc))
 
-def mine(site):
-    return site.owner == myID
+def lowest_strength(pieces):
+    return min(pieces, key=lambda piece: piece.site.strength, default=None)
 
-def lowest_strength(tups):
-    return min(tups, key=lambda tup: tup.site.strength, default=None)
-
-def adjacent_unowned_lowest_strength(gameMap, location):
+def adjacent_unowned_lowest_strength(gmap, location):
     'the location next to this piece with the lowest strength'
-    minimum = 300
-    result = None
-    not_mine = filter(lambda tup: not mine(tup.site),
-                      adjacent_sites(gameMap, location))
+    not_mine = filter(lambda piece: not p_mine(piece.site),
+                      adjacent_sites(gmap, location))
     return lowest_strength(not_mine)
 
-def get_direction(gameMap, first, second):
+def get_direction(gmap, first, second):
     'given two adjacent locations returns direction from first to second'
     for direction in CARDINALS:
-        loc = gameMap.getLocation(first, direction)
+        loc = gmap.getLocation(first, direction)
         if loc.x == second.x and loc.y == second.y:
             return direction
     assert False, 'second is not adjacent to first'
 
-def is_perimeter(gameMap, location):
+def is_perimeter(gmap, location):
     # if there are any adjacent nodes which are not mine, I'm perimeter
-    for item in filter(lambda tup: not mine(tup.site),
-            adjacent_sites(gameMap, location)):
+    for item in filter(lambda piece: not p_mine(piece.site),
+                       adjacent_sites(gmap, location)):
         return True
     return False
 
-while True:
-    moves = []
-    gameMap = getFrame()
+def all_pieces(gmap):
+    for y in range(gmap.height):
+        for x in range(gmap.width):
+            location = Location(x, y)
+            site = gmap.getSite(location)
+            yield Piece(location, site)
 
+def moves_for(gmap):
+    moves = []
     perimeter_tree = kdtree.create(dimensions=2)
     perimeter_nodes = []
-
     internal_nodes = []
 
-    # first collect all the nodes
-    for y in range(gameMap.height):
-        for x in range(gameMap.width):
-            location = Location(x, y)
-            site = gameMap.getSite(location)
-            if not mine(site):
-                continue
+    # 1) partition all our pieces
 
-            if is_perimeter(gameMap, location):
-                perimeter_tree.add((x, y))
-                perimeter_nodes.append(location)
-            else:
-                internal_nodes.append(location)
+    my_pieces = filter(lambda piece: p_mine(piece.site), all_pieces(gmap))
 
+    p_perim = lambda piece: is_perimeter(gmap, piece.loc)
+    perimeter_nodes, internal_nodes = group_by_pred(p_perim, my_pieces)
+
+    for piece in perimeter_nodes:
+        perimeter_tree.add((piece.loc.x, piece.loc.y))
     perimeter_tree.rebalance()
 
-    # now move them!
-    for location in perimeter_nodes:
-        site = gameMap.getSite(location)
-        target = adjacent_unowned_lowest_strength(gameMap, location)
+    # 2) move perimeter_nodes
 
-        if not target:
-            continue
+    for (location, site) in perimeter_nodes:
+        target = adjacent_unowned_lowest_strength(gmap, location)
+        assert target
 
-        if target[1].strength > site.strength:
+        if target.site.strength > site.strength:
             # we're too weak to attack, wait it out
             continue
 
-        direction = get_direction(gameMap, location, target[0])
+        direction = get_direction(gmap, location, target.loc)
         moves.append(Move(location, direction))
 
-    # keep track of where you'll move every piece and refuse to move enough strength
-    # into the same spot if it causes overcapping
+    # refuse to move enough strength into a location to cause overcapping
     overcap_map = defaultdict(int)
-    # TODO: there has to be a cleaner way to do this, it's too easy to forget to update
-    # the overcap_map after making a decision
-    # MAYBE: the overcap is currently very greedy, the first piece to want to move gets
-    # priority. Are there situations where a later piece might be more important?
 
-    stays, highs = group_by_pred(lambda loc: gameMap.getSite(loc).strength < 50,
+    # 3) move internal pieces
+
+    stays, highs = group_by_pred(lambda piece: gmap.getSite(piece.loc).strength < 50,
                                  internal_nodes)
 
-    for location in stays:
-        site = gameMap.getSite(location)
-        overcap_map[(location.x, location.y)] += site.strength
+    for (location, site) in stays:
+        overcap_map[location] += site.strength
 
-    for location in highs:
-        site = gameMap.getSite(location)
-
+    for (location, site) in highs:
         closest_perim = perimeter_tree.search_nn((location.x, location.y))[0]
         perim_loc = Location(closest_perim.data[0], closest_perim.data[1])
 
@@ -140,25 +142,25 @@ while True:
             # This still allows some amount of capping, the idea is that two squares
             # which are both at 255 won't move into each other, but if we don't allow
             # any overcapping at all the big pieces get trapped
-            moved_strength = overcap_map[(neighbor.loc.x, neighbor.loc.y)]
+            moved_strength = overcap_map[neighbor.loc]
             return site.strength + moved_strength <= 300
-        allowed = filter(p_overcap, adjacent_sites(gameMap, location))
+        allowed = filter(p_overcap, adjacent_sites(gmap, location))
 
-        distance_to = lambda neighbor: gameMap.getDistance(perim_loc, neighbor.loc)
-        min_neighbor = min(allowed, key=distance_to, default=None)
+        distance_to = lambda neighbor: gmap.getDistance(perim_loc, neighbor.loc)
+        closest_neighbor = min(allowed, key=distance_to, default=None)
 
-        # to stop oscillating, we should also never move away from the perim?
-        # (the max_neighbor should be filtered out)
-
-        if not min_neighbor:
+        if not closest_neighbor:
             # we shouldn't move, make sure nobody crashes into us
-            overcap_map[(location.x, location.y)] += site.strength
+            overcap_map[location] += site.strength
             continue
 
-        direction = get_direction(gameMap, location, min_neighbor.loc)
+        direction = get_direction(gmap, location, closest_neighbor.loc)
         moves.append(Move(location, direction))
+        overcap_map[closest_neighbor.loc] += site.strength
 
-        next_spot = gameMap.getLocation(location, direction)
-        overcap_map[(next_spot.x, next_spot.y)] += site.strength
+    return moves
 
+while True:
+    gameMap = getFrame()
+    moves = moves_for(gameMap)
     sendFrame(moves)

@@ -19,11 +19,17 @@ class Location:
         self.x = x
         self.y = y
 
+    def __key(self):
+        return (self.x, self.y)
+
     def __eq__(self, obj):
-        return self.x == obj.x and self.y == obj.y
+        return self.__key() == obj.__key()
 
     def __repr__(self):
         return "<Location {}, {}>".format(self.x, self.y)
+
+    def __hash__(self):
+        return hash(self.__key())
 
 
 class Site:
