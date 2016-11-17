@@ -98,6 +98,20 @@ class GameMap:
             dy += self.height
         return math.atan2(dy, dx)
 
+    def one_over(self, loc, direction):
+        if direction == STILL:
+            # TODO: Is the copy important? Locations should be immutable...
+            return Location(loc.x, loc.y)
+        if direction == NORTH:
+            return Location(loc.x, (loc.y - 1) % self.height)
+        if direction == SOUTH:
+            return Location(loc.x, (loc.y + 1) % self.height)
+        if direction == EAST:
+            return Location((loc.x + 1) % self.width, loc.y)
+        if direction == WEST:
+            return Location((loc.x - 1) % self.width, loc.y)
+        assert False
+
     def getLocation(self, loc, direction):
         l = copy.deepcopy(loc)
         if direction != STILL:
@@ -123,7 +137,6 @@ class GameMap:
                     l.x -= 1
         return l
 
-
     def getSite(self, l, direction = STILL):
-        l = self.getLocation(l, direction)
+        l = self.one_over(l, direction)
         return self.contents[l.y][l.x]

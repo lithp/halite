@@ -30,6 +30,7 @@ Problems:
 from collections import namedtuple, defaultdict
 import random
 import kdtree
+import cProfile, pstats
 
 from hlt import *
 from networking import *
@@ -57,7 +58,7 @@ def group_by_pred(pred, iterable):
 
 def adjacent_sites(gmap, location):
     for direction in CARDINALS:
-        loc = gmap.getLocation(location, direction)
+        loc = gmap.one_over(location, direction)
         site = gmap.getSite(loc)
         assert site, 'I am so confused'
         yield Piece(loc, gmap.getSite(loc))
@@ -74,7 +75,7 @@ def adjacent_unowned_lowest_strength(gmap, location):
 def get_direction(gmap, first, second):
     'given two adjacent locations returns direction from first to second'
     for direction in CARDINALS:
-        loc = gmap.getLocation(first, direction)
+        loc = gmap.one_over(first, direction)
         if loc.x == second.x and loc.y == second.y:
             return direction
     assert False, 'second is not adjacent to first'
@@ -160,7 +161,26 @@ def moves_for(gmap):
 
     return moves
 
+turn = 0
 while True:
     gameMap = getFrame()
+
+    if turn == 100:
+        profile = cProfile.Profile()
+
+    if turn >= 100 and turn <= 199:
+        profile.enable()
+
     moves = moves_for(gameMap)
+
+    if turn >= 100 and turn <= 199:
+        profile.disable()
+
+    if turn == 199:
+        profile.create_stats()
+
+        stats = pstats.Stats(profile)
+        stats.dump_stats('thermal.profile')
+
     sendFrame(moves)
+    turn += 1
