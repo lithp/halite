@@ -61,7 +61,7 @@ def adjacent_sites(gmap, location):
         loc = gmap.one_over(location, direction)
         site = gmap.getSite(loc)
         assert site, 'I am so confused'
-        yield Piece(loc, gmap.getSite(loc))
+        yield Piece(loc, site)
 
 def lowest_strength(pieces):
     return min(pieces, key=lambda piece: piece.site.strength, default=None)
@@ -165,22 +165,22 @@ turn = 0
 while True:
     gameMap = getFrame()
 
-    if turn == 100:
-        profile = cProfile.Profile()
+    #if turn == 100:
+    #    profile = cProfile.Profile()
 
-    if turn >= 100 and turn <= 199:
-        profile.enable()
+    #if turn >= 100 and turn <= 199:
+    #    profile.enable()
 
     moves = moves_for(gameMap)
 
-    if turn >= 100 and turn <= 199:
-        profile.disable()
+    #if turn >= 100 and turn <= 199:
+    #    profile.disable()
 
-    if turn == 199:
-        profile.create_stats()
+    #if turn == 199:
+    #    profile.create_stats()
 
-        stats = pstats.Stats(profile)
-        stats.dump_stats('thermal.profile')
+    #    stats = pstats.Stats(profile)
+    #    stats.dump_stats('thermal.profile')
 
     sendFrame(moves)
     turn += 1
