@@ -5,7 +5,8 @@ Katamari - proof of concept
            pathfinds backwards to find enough pieces, then sets them rolling
 
 Problems - doesn't take production into account
-           there are many pieces in the middle which aren't being routed?
+           during combat all the squares next to the enemy count as 0 so we move the
+             minium of pieces into them, when we should move many pieces into them
 
 eventual goal:
 
@@ -27,6 +28,7 @@ Once we've made contact with the enemy send everything you have down it.
 
 from queue import PriorityQueue
 from collections import namedtuple
+import functools
 
 from hlt import *
 from networking import *
@@ -42,30 +44,14 @@ def p_mine(site):
 def p_my_piece(piece):
     return p_mine(piece.site)
 
-def group_by_pred(pred, iterable):
-    'takes an iterable and returns two lists, the True and False lists'
-    true, false = [], []
-    for item in iterable:
-        if pred(item):
-            true.append(item)
-        else:
-            false.append(item)
-    return true, false
-
 def adjacent_pieces(gmap, location):
     for direction in CARDINALS:
         loc = gmap.one_over(location, direction)
         site = gmap.getSite(loc)
-        assert site, 'I am so confused'
         yield Piece(loc, site)
 
 def my_adjacent_pieces(gmap, location):
-    for piece in adjacent_pieces(gmap, location):
-        if p_my_piece(piece):
-            yield piece
-
-def lowest_strength(pieces):
-    return min(pieces, key=lambda piece: piece.site.strength, default=None)
+    return filter(p_my_piece, adjacent_pieces(gmap, location))
 
 def get_direction(gmap, first, second):
     'given two adjacent locations returns direction from first to second'
@@ -75,22 +61,10 @@ def get_direction(gmap, first, second):
             return direction
     assert False, 'second is not adjacent to first'
 
-def is_perimeter(gmap, location):
-    'a piece I own adjacent to a piece I do not own'
-    if not p_mine(gmap.getSite(location)):
+def piece_is_border(gmap, piece):
+    if p_my_piece(piece):
         return False
-    for item in filter(p_my_piece, adjacent_pieces(gmap, location)):
-        return True
-    return False
-
-def is_border(gmap, location):
-    'a piece I do not own, adjacent to a piece I own'
-    if p_mine(gmap.getSite(location)):
-            return False
-    for item in filter(lambda piece: p_mine(piece.site),
-                       adjacent_pieces(gmap, location)):
-        return True
-    return False
+    return bool(my_adjacent_pieces(gmap, piece.loc))
 
 def all_pieces(gmap):
     for y in range(gmap.height):
@@ -99,33 +73,19 @@ def all_pieces(gmap):
             site = gmap.getSite(location)
             yield Piece(location, site)
 
-def find_move(gmap, used_pieces):
-    def p_valid_border(piece):
-        if p_my_piece(piece):
-            return False
-        mine = filter(p_my_piece, adjacent_pieces(gmap, piece.loc))
-        for item in filter(lambda p: p.loc not in used_pieces, mine):
-            return True
-        return False
-
-    border_pieces = filter(p_valid_border, all_pieces(gmap))
-    target = lowest_strength(border_pieces)
-
-    if not target:
-        return (None, None)
-
+def find_move(gmap, target, used_locations):
     unexplored = PriorityQueue()
     visited = set()
 
     unexplored.put((target.site.strength, target, set()))
     visited.add(target.loc)
 
-    # TODO: I think removing visited and only using path_locations is smart?
+    # TODO: I think removing visited and only using path_locations makes sense?
     while not unexplored.empty():
         (remaining, candidate, path_locations) = unexplored.get()
 
         for piece in my_adjacent_pieces(gmap, candidate.loc):
-            if piece.loc in used_pieces:
+            if piece.loc in used_locations:
                 continue
             if piece.loc in visited:
                 continue
@@ -142,12 +102,19 @@ def find_move(gmap, used_pieces):
     return (None, None) # we don't have enough strength so wait until we do
 
 def moves_for(gmap):
+    # Build a list of all border pieces and sort them by strength
+    # for each border:
+    #  attempt to find the strength to attack it, receiving (move, used_locations)
+
+    borders = filter(functools.partial(piece_is_border, gmap), all_pieces(gmap))
+    borders = sorted(borders, key=lambda p: p.site.strength)
     moves, used_locations = [], set()
-    (new_move, new_locations) = find_move(gmap, used_locations)
-    while new_move:
-        used_locations |= new_locations
-        moves.append(new_move)
-        (new_move, new_locations) = find_move(gmap, used_locations)
+
+    for border in borders:
+        (move, consumed) = find_move(gmap, border, used_locations)
+        if move:
+            moves.append(move)
+            used_locations |= consumed
 
     return moves
 
