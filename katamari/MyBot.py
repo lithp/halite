@@ -4,6 +4,9 @@ Katamari - proof of concept
            waits until we have enough strength to capture it
            pathfinds backwards to find enough pieces, then sets them rolling
 
+Problems - doesn't take into account production
+           only one target at a time is being addressed
+
 eventual goal:
 
 Stingray - finds the lowest cost tunnel to the enemy and uses it
@@ -101,35 +104,56 @@ def all_pieces(gmap):
             site = gmap.getSite(location)
             yield Piece(location, site)
 
-def moves_for(gmap):
-    border_pieces = filter(lambda piece: is_border(gmap, piece.loc),
-                           all_pieces(gmap))
-    target = min(border_pieces, key=lambda piece: piece.site.strength)
+def find_move(gmap, used_pieces):
+    def p_valid_border(piece):
+        if p_my_piece(piece):
+            return False
+        mine = filter(p_my_piece, adjacent_pieces(gmap, piece.loc))
+        for item in filter(lambda p: p.loc not in used_pieces, mine):
+            return True
+        return False
+
+    border_pieces = filter(p_valid_border, all_pieces(gmap))
+    target = min(border_pieces, key=lambda piece: piece.site.strength, default=None)
+
+    if not target:
+        return (None, None)
 
     unexplored = PriorityQueue()
     visited = set()
 
-    unexplored.put((target.site.strength, target))
+    unexplored.put((target.site.strength, target, set()))
     visited.add(target.loc)
 
     while not unexplored.empty():
-        (remaining, candidate) = unexplored.get()
+        (remaining, candidate, path_locations) = unexplored.get()
 
         for piece in my_adjacent_pieces(gmap, candidate.loc):
+            if piece.loc in used_pieces:
+                continue
             if piece.loc in visited:
                 continue
+
+            new_path_locations = path_locations.union([piece.loc])
+
             if piece.site.strength > remaining:
                 direction = get_direction(gmap, piece.loc, candidate.loc)
-                return [Move(piece.loc, direction)]
+                return (Move(piece.loc, direction), new_path_locations)
 
-            unexplored.put((remaining-piece.site.strength, piece))
+            unexplored.put((remaining - piece.site.strength, piece, new_path_locations))
             visited.add(piece.loc)
 
-    return [] # we don't have enough strength so wait until we do
+    return (None, None) # we don't have enough strength so wait until we do
 
-    # TODO: Mark all nodes which were used during this process
-    # Then repeat with the next strongest border_piece and attempt to take it
-    # using the remaining nodes.
+def moves_for(gmap):
+    moves, used_locations = [], set()
+    (new_move, new_locations) = find_move(gmap, used_locations)
+    while new_move:
+        used_locations |= new_locations
+        moves.append(new_move)
+        (new_move, new_locations) = find_move(gmap, used_locations)
+
+    return moves
 
 while True:
     gameMap = getFrame()
