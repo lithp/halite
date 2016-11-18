@@ -2,7 +2,7 @@
 Amoeba - pieces on the permiter attack the highest production piece they can
        - pieces on the interior wait it out
 
-Lance - pieces on the interior move to the closest perimeter
+Lance - pieces on the interior move to the closest perimeter if it wouldn't cap
 '''
 
 import logging
@@ -127,6 +127,36 @@ while True:
         min_neighbor = min(adjacent_sites(gameMap, location), key=distance_to)
 
         direction = get_direction(gameMap, location, min_neighbor.loc)
+        #next_spot = gameMap.getLocation(location, direction)
         moves.append(Move(location, direction))
 
     sendFrame(moves)
+
+'''
+        # debug the current state!
+        log.debug('Current board:')
+        log.debug('--------------')
+
+        for y in range(gameMap.height):
+            line = []
+            for x in range(gameMap.width):
+                loc = Location(x, y)
+                site = gameMap.getSite(loc)
+                if loc.x == location.x and loc.y == location.y:
+                    line.append('Q')
+                elif min_neighbor.loc.x == loc.x and min_neighbor.loc.y == loc.y:
+                    line.append('M')
+#                elif next_spot.x == loc.x and next_spot.y == loc.y:
+#                    line.append('N')
+                elif perim_loc.x == loc.x and perim_loc.y == loc.y:
+                    line.append('Z')
+                elif site.owner == myID:
+                    line.append('x')
+                else:
+                    line.append('_')
+            log.debug(' '.join(line))
+
+        log.debug('direction: %s', direction)
+
+        assert False
+'''

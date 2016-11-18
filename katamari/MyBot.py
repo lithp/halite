@@ -4,8 +4,8 @@ Katamari - proof of concept
            waits until we have enough strength to capture it
            pathfinds backwards to find enough pieces, then sets them rolling
 
-Problems - doesn't take into account production
-           only one target at a time is being addressed
+Problems - doesn't take production into account
+           there are many pieces in the middle which aren't being routed?
 
 eventual goal:
 
@@ -67,11 +67,6 @@ def my_adjacent_pieces(gmap, location):
 def lowest_strength(pieces):
     return min(pieces, key=lambda piece: piece.site.strength, default=None)
 
-def adjacent_unowned_lowest_strength(gmap, location):
-    'the location next to this piece with the lowest strength'
-    not_mine = filter(p_my_piece, adjacent_pieces(gmap, location))
-    return lowest_strength(not_mine)
-
 def get_direction(gmap, first, second):
     'given two adjacent locations returns direction from first to second'
     for direction in CARDINALS:
@@ -114,7 +109,7 @@ def find_move(gmap, used_pieces):
         return False
 
     border_pieces = filter(p_valid_border, all_pieces(gmap))
-    target = min(border_pieces, key=lambda piece: piece.site.strength, default=None)
+    target = lowest_strength(border_pieces)
 
     if not target:
         return (None, None)
@@ -125,6 +120,7 @@ def find_move(gmap, used_pieces):
     unexplored.put((target.site.strength, target, set()))
     visited.add(target.loc)
 
+    # TODO: I think removing visited and only using path_locations is smart?
     while not unexplored.empty():
         (remaining, candidate, path_locations) = unexplored.get()
 
