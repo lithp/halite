@@ -19,7 +19,7 @@ from networking import *
 Piece = namedtuple('Piece', ['loc', 'site'])
 
 myID, gameMap = getInit()
-sendInit('katamari')
+sendInit('damacy')
 
 def p_mine(site):
     return site.owner == myID
