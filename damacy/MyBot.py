@@ -4,35 +4,13 @@ Katamari - proof of concept
            waits until we have enough strength to capture it
            pathfinds backwards to find enough pieces, then sets them rolling
 
-Problems - doesn't take production into account
-           - a little production happens while our chain moves out
-           - we expand into the weakest piece, maximizing short-term territory gains
-           during combat all the squares next to the enemy count as 0 so we move the
-             minium of pieces into them, when we should move many pieces into them
-           we only make chains, when maybe we should prefer to use branches, since those
-             would get us to our targets in fewer moves?
-           much strength tends to get stuck on the inside because it's "never needed"
-
-eventual goal:
-
-Stingray - finds the lowest cost tunnel to the enemy and uses it
-
-Does a floodfill starting at the enemy (much like A*) and marks each piece by
-how many strength away from the enemy it is. All pieces move downhill along that
-gradient (to find a target) (respecting the Katamari strategy)
-
-2 1 2 3 4 5
-1 x 1 2 o 6
-2 1 2 3 4 5
-
-Alternatively:
-
-Uses A* to route to any part of the enemy from any point on the perimeter.
-Once we've made contact with the enemy send everything you have down it.
+Damacy   - does the same but instead of looking for lowest strength, looks for the
+           cheapest path to the enemy
 '''
 
+import math
 from queue import PriorityQueue
-from collections import namedtuple
+from collections import namedtuple, defaultdict
 import functools
 
 from hlt import *
@@ -48,6 +26,9 @@ def p_mine(site):
 
 def p_my_piece(piece):
     return p_mine(piece.site)
+
+def p_enemy(piece):
+    return piece.site.owner != myID and piece.site.owner != 0
 
 def adjacent_pieces(gmap, location):
     for direction in CARDINALS:
@@ -77,6 +58,44 @@ def all_pieces(gmap):
             location = Location(x, y)
             site = gmap.getSite(location)
             yield Piece(location, site)
+
+def cost_to_enemy_map(gmap):
+    '''
+    returns a dict[loc] -> cost, where cost is the cheapest path
+    (by strength) from this cell to any enemy cell.
+    '''
+    enemies = [enemy.loc for enemy in all_pieces(gmap) if p_enemy(enemy)]
+
+    # flood-fill, starting from any of the enemies, until there are no more nodes
+    horizon = PriorityQueue()
+    visited = set()
+
+    # defaultdict because lower down we stop routing once we see any of our own pieces.
+    # doing so means that any enclaves are never considered which causes issues later on.
+    cost_to_enemy = defaultdict(lambda: math.inf)
+
+    for enemy in enemies:
+        cost_to_enemy[enemy] = 0
+        visited.add(enemy)
+        horizon.put((0, enemy)) # All enemy cells are considered equally valuable
+
+    while not horizon.empty():
+        (curr_cost, enemy) = horizon.get()
+
+        for neighbor in adjacent_pieces(gmap, enemy):
+            if neighbor.loc in visited:
+                continue
+            visited.add(neighbor.loc)
+
+            # TODO: Maybe you don't want this check?
+            if p_my_piece(neighbor):
+                continue
+
+            new_cost = curr_cost + neighbor.site.strength
+            cost_to_enemy[neighbor.loc] = new_cost
+            horizon.put((new_cost, neighbor.loc))
+
+    return cost_to_enemy
 
 def find_move(gmap, target, used_locations):
     unexplored = PriorityQueue()
@@ -111,8 +130,10 @@ def moves_for(gmap):
     # for each border:
     #  attempt to find the strength to attack it, receiving (move, used_locations)
 
+    cost_map = cost_to_enemy_map(gmap)
+
     borders = filter(functools.partial(piece_is_border, gmap), all_pieces(gmap))
-    borders = sorted(borders, key=lambda p: p.site.strength)
+    borders = sorted(borders, key=lambda p: cost_map[p.loc])
     moves, used_locations = [], set()
 
     for border in borders:
