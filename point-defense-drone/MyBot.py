@@ -11,6 +11,16 @@ Damacy   - does the same but instead of looking for lowest strength, looks for t
            enemy pieces next to them
            (this had almost no effect, and made the performance on small boards worse)
 
+Point Defense Drone - once it makes contact with the enemy it routes all pieces towards
+                      that point of contact, avoiding capping as much as possible
+
+                      starting at the point of contact we do a breadth-first search,
+                      keeping track of where each piece will move (to prevent capping).
+                      If it isn't able to move it waits
+
+                      at each point we find the unvisited neighbors and attempt to pull 
+                      them towards us
+
 Problem for combat:
 - First we plan a move for the piece next to the enemy.
 - After we've planned the move, the best path to the enemy is now "taken", so pieces
@@ -46,7 +56,7 @@ This bot does quite badly at close quarters
 '''
 
 import math
-from queue import PriorityQueue
+from queue import PriorityQueue, Queue
 from collections import namedtuple, defaultdict
 import functools
 
@@ -56,7 +66,7 @@ from networking import *
 Piece = namedtuple('Piece', ['loc', 'site'])
 
 myID, gameMap = getInit()
-sendInit('damacy')
+sendInit('point-defense-drone')
 
 def p_mine(site):
     return site.owner == myID
@@ -134,6 +144,41 @@ def cost_to_enemy_map(gmap):
 
     return cost_to_enemy
 
+def assign_to_battle(gmap, target, used_locations):
+    '''
+    Takes every piece within a radius of 10 from the target and moves it towards the
+    target
+    '''
+    visited = set() # the set of nodes we have already considered
+    unexplored = Queue() # the neighbors of visited nodes
+    moves = []
+    assigned = set()
+
+    # ignore capping for now
+
+    unexplored.put((target, 0))
+    visited.add(target.loc)
+
+    while not unexplored.empty():
+        (current, depth) = unexplored.get()
+
+        for neighbor in my_adjacent_pieces(gmap, current.loc):
+            if neighbor.loc in visited:
+                continue
+            visited.add(neighbor.loc)
+
+            if neighbor.site.strength != 0:
+                # pull the neighbor to this cell
+                direction = get_direction(gmap, neighbor.loc, current.loc)
+                moves.append(Move(neighbor.loc, direction))
+                assigned.add(neighbor.loc)
+
+            if (depth + 1) <= 10:
+                unexplored.put((neighbor, depth + 1))
+
+    return moves, assigned
+
+
 def find_move(gmap, target, used_locations):
     unexplored = PriorityQueue()
     visited = set()
@@ -175,15 +220,31 @@ def find_move(gmap, target, used_locations):
     return (None, None) # we don't have enough strength so wait until we do
 
 def moves_for(gmap):
-    # Build a list of all border pieces and sort them by strength
-    # for each border:
-    #  attempt to find the strength to attack it, receiving (move, used_locations)
+
+    # 1. first look for points of conflict
+    def is_conflicted(piece):
+        if not piece.site.strength == 0:
+            return False
+        next_to_mine = False
+        next_to_enemy = False
+        for piece in adjacent_pieces(gmap, piece.loc):
+            owner = piece.site.owner
+            next_to_mine |= (owner == myID)
+            next_to_enemy |= (owner != myID and owner != 0)
+        return next_to_mine and next_to_enemy
+    battles = filter(is_conflicted, all_pieces(gmap))
+
+    try:
+        first_battle = next(battles)
+    except StopIteration:
+        moves, used_locations = [], set()
+    else:
+        (moves, used_locations) = assign_to_battle(gmap, first_battle, set())
 
     cost_map = cost_to_enemy_map(gmap)
 
     borders = filter(functools.partial(piece_is_border, gmap), all_pieces(gmap))
     borders = sorted(borders, key=lambda p: cost_map[p.loc])
-    moves, used_locations = [], set()
 
     for border in borders:
         (move, consumed) = find_move(gmap, border, used_locations)
