@@ -21,6 +21,9 @@ Point Defense Drone - once it makes contact with the enemy it routes all pieces 
                       at each point we find the unvisited neighbors and attempt to pull 
                       them towards us
 
+biggest todo:
+    - deal with all points of battle instead of a randomly chosen one
+
 Problems:
     - platooning appears to be important even during battles
     - routing all your strength appears to be more important than battles
@@ -183,6 +186,8 @@ def assign_to_battle(gmap, target, used_locations):
                 assigned.add(neighbor.loc)
                 assigned_strength[current.loc] += neighbor.site.strength
 
+            # removing this depth causes us to lose terribly, but mostly because we only
+            # target a single point of battle
             if (depth + 1) <= 10:
                 unexplored.put((neighbor, depth + 1))
 
