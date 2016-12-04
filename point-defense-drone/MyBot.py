@@ -21,6 +21,12 @@ Point Defense Drone - once it makes contact with the enemy it routes all pieces 
                       at each point we find the unvisited neighbors and attempt to pull 
                       them towards us
 
+Problems:
+    - platooning appears to be important even during battles
+    - routing all your strength appears to be more important than battles
+      (for big maps, your interior still caps and it's a massive waste)
+    - (also, only thinks about one battle at a time)
+
 Problem for combat:
 - First we plan a move for the piece next to the enemy.
 - After we've planned the move, the best path to the enemy is now "taken", so pieces
@@ -145,16 +151,14 @@ def cost_to_enemy_map(gmap):
     return cost_to_enemy
 
 def assign_to_battle(gmap, target, used_locations):
-    '''
-    Takes every piece within a radius of 10 from the target and moves it towards the
-    target
-    '''
+    'Takes every piece within a radius of 10 and moves them towards the target'
     visited = set() # the set of nodes we have already considered
     unexplored = Queue() # the neighbors of visited nodes
     moves = []
     assigned = set()
 
-    # ignore capping for now
+    # prevent capping by keeping track of how much strength is sent to each node
+    assigned_strength = defaultdict(int) # map from loc->strength
 
     unexplored.put((target, 0))
     visited.add(target.loc)
@@ -162,16 +166,22 @@ def assign_to_battle(gmap, target, used_locations):
     while not unexplored.empty():
         (current, depth) = unexplored.get()
 
+        if current.loc not in assigned:
+            # none of my neighbors with a lower depth wanted me, so I will stay
+            assigned_strength[current.loc] += current.site.strength
+            assigned.add(current.loc)
+
         for neighbor in my_adjacent_pieces(gmap, current.loc):
             if neighbor.loc in visited:
                 continue
             visited.add(neighbor.loc)
 
-            if neighbor.site.strength != 0:
+            if neighbor.site.strength + assigned_strength[current.loc] < 255:
                 # pull the neighbor to this cell
                 direction = get_direction(gmap, neighbor.loc, current.loc)
                 moves.append(Move(neighbor.loc, direction))
                 assigned.add(neighbor.loc)
+                assigned_strength[current.loc] += neighbor.site.strength
 
             if (depth + 1) <= 10:
                 unexplored.put((neighbor, depth + 1))
